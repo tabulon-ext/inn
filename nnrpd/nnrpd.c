@@ -1109,7 +1109,7 @@ main(int argc, char *argv[])
             syswarn("could not nice to %lu", innconf->nicennrpd);
     }
 
-    HISTORY = concatpath(innconf->pathdb, INN_PATH_HISTORY);
+    HISTORY = concatpath(innconf->pathhistory, INN_PATH_HISTORY);
     ACTIVE = concatpath(innconf->pathdb, INN_PATH_ACTIVE);
     ACTIVETIMES = concatpath(innconf->pathdb, INN_PATH_ACTIVETIMES);
     NEWSGROUPS = concatpath(innconf->pathdb, INN_PATH_NEWSGROUPS);
@@ -1429,16 +1429,13 @@ main(int argc, char *argv[])
 
     if ((PERMaccessconf && PERMaccessconf->readertrack)
         || (!PERMaccessconf && innconf->readertrack)) {
-        int len;
         syslog(L_NOTICE, "%s Tracking Enabled (%s)", Client.host, Username);
         pid = getpid();
         gettimeofday(&tv, NULL);
         count += pid;
         vid = tv.tv_sec ^ tv.tv_usec ^ pid ^ count;
-        len = strlen("innconf->pathlog") + strlen("/tracklogs/log-") + BUFSIZ;
-        LocalLogFileName = xmalloc(len);
-        sprintf(LocalLogFileName, "%s/tracklogs/log-%u", innconf->pathlog,
-                vid);
+        xasprintf(&LocalLogFileName, "%s/tracklogs/log-%u", innconf->pathlog,
+                  vid);
         if ((locallog = fopen(LocalLogFileName, "w")) == NULL) {
             LocalLogDirName = concatpath(innconf->pathlog, "tracklogs");
             MakeDirectory(LocalLogDirName, false);

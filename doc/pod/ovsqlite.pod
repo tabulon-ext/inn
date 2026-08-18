@@ -5,7 +5,7 @@ ovsqlite - SQLite-based overview storage method for INN
 =head1 DESCRIPTION
 
 This method uses SQLite to store overview data.  It requires version
-3.8.2 or later of the SQLite library (3.20.0+ recommended).
+3.24.0 or later of the SQLite library.
 
 SQLite source, documentation, etc. are available at
 L<https://www.sqlite.org/>.  Ones of the stated goals of the SQLite
@@ -75,7 +75,12 @@ The maximum number of bytes of the database file that SQLite will
 memory-map.  When set, SQLite reads data directly from the operating
 system's page cache via mmap instead of copying it into its own page
 cache, which can significantly improve read performance for large
-databases.  A good starting value is the size of the database file
+databases.  When I<walmode> is enabled, B<nnrpd> reader processes honor
+this setting too, which additionally lets them share physical memory
+pages for the same database regions through the operating system's page
+cache.  This is of little benefit on ZFS or others without a unified
+buffer cache, where the mapped pages would simply be cached twice.
+A good starting value is the size of the database file
 or the amount of available memory, whichever is smaller.  For example,
 a value of C<4294967296> allows up to S<4 GB> to be memory-mapped.
 The default value of C<0> disables memory-mapped I/O.
@@ -83,7 +88,7 @@ The default value of C<0> disables memory-mapped I/O.
 =item I<walmode>
 
 If this parameter is true, ovsqlite will use SQLite's WAL (Write-Ahead
-Logging) journal mode instead of the default PERSIST mode.  WAL mode
+Logging) journal mode instead of PERSIST mode.  WAL mode
 allows concurrent readers and writers without blocking, which significantly
 improves read performance when multiple B<nnrpd> processes access the
 overview database simultaneously.  It also sets C<synchronous> to
@@ -92,11 +97,12 @@ C<NORMAL>, which is safe with WAL and reduces unnecessary fsync overhead.
 On shutdown, the WAL is checkpointed back into the main database file
 and truncated.
 
-B<Note:> WAL mode requires shared-memory support and does not work on
-network filesystems such as NFS.  Do not enable this parameter if
-I<pathoverview> is on a network filesystem.
+B<Note:> WAL mode requires shared-memory support and does not work on network
+filesystems such as NFS when B<innd> and B<nnrpd> are not exclusively run on
+one mount consumer.  Disable this parameter if I<pathoverview> is shared on a
+network filesystem between two different hosts.
 
-The default value is false.
+The default value is true.
 
 =item I<readercachesize>
 
@@ -174,6 +180,64 @@ database directly with read-only access, bypassing B<ovsqlite-server>
 for read operations.  This eliminates the IPC round-trip and server
 serialization bottleneck, allowing read performance to scale with the
 number of concurrent readers.
+
+=head1 VACUUMING
+
+ovsqlite does B<not> vacuum the database automatically, and that is
+intentional.
+
+When overview rows are deleted (for example by B<expireover>), SQLite does
+not usually shrink F<ovsqlite.db>.  It places free pages on a freelist and
+reuses them for later inserts.  For a news spool that receives and expires
+at a steady rate, the overview database therefore grows to a high-water mark
+and then stays there: freelist pages absorb the churn of B<expireover> and
+intake without constantly extending or truncating the file.  That behaviour
+is efficient.  Keeping the high-water mark avoids repeated filesystem
+allocations and means B<expireover> does not pay the cost of a full rewrite on
+every run.
+
+A full C<VACUUM> rewrites the entire database into a compact copy and
+replaces the original.  It reclaims freelist space (and can apply a new page
+size if C<PRAGMA page_size> was set beforehand), but it needs free disk space
+on the order of the current file size, takes time proportional to the
+database size, and needs exclusive access while it runs.  Automatic
+vacuuming after every B<expireover> would therefore be expensive and usually
+pointless: the next day of traffic would grow the file back toward the same
+high-water mark.
+
+Vacuum manually with C<ovsqlite-util -v> only when the smaller size is
+actually wanted for the long term, for example:
+
+=over 2
+
+=item *
+
+After a large, permanent reduction in retention (so the overview will not
+grow back to the old size).
+
+=item *
+
+After purging many newsgroups or other bulk deletes that left a large
+freelist (check with C<ovsqlite-util -s>; freelist share is reported
+there).
+
+=item *
+
+When changing I<pagesize> on an existing database.  The I<pagesize>
+parameter in F<ovsqlite.conf> is consulted only when creating a new database.
+To change the page size of an existing overview, stop the news system, set
+C<PRAGMA page_size> to the desired value, and vacuum (C<ovsqlite-util -v>
+reclaims freelist space; applying a new page size can be done with the
+B<sqlite3> CLI as C<PRAGMA page_size=N; VACUUM;> on the stopped database),
+or rebuild overview with B<makehistory>.  Prefer choosing an appropriate
+page size when the database is first created.
+
+=back
+
+For a large vacuum, stop the news system with C<rc.news stop> so
+B<ovsqlite-server> and B<nnrpd> are not holding the database open.  In normal
+operation, leave freelist pages alone and treat the high-water mark as the
+steady-state size of an expiring spool.
 
 =head1 HISTORY
 

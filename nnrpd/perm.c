@@ -1,6 +1,11 @@
 /*
 **  How to figure out where a user comes from, and what that user can do once
 **  we know who he is.
+**
+**  Originally written by Aidan Cully <aidan@panix.com> in 1998
+**
+**  Various bug fixes, code and documentation improvements since then
+**  in 1998-2006, 2008-2011, 2013-2016, 2021-2023, 2026.
 */
 
 #include "portable/system.h"
@@ -469,6 +474,8 @@ copy_accessgroup(ACCESSGROUP *orig)
         ret->backoff_db = xstrdup(orig->backoff_db);
     if (orig->newsmaster)
         ret->newsmaster = xstrdup(orig->newsmaster);
+    if (orig->addcanlockuser)
+        ret->addcanlockuser = xstrdup(orig->addcanlockuser);
     return (ret);
 }
 
@@ -607,6 +614,8 @@ free_accessgroup(ACCESSGROUP *del)
         free(del->backoff_db);
     if (del->newsmaster)
         free(del->newsmaster);
+    if (del->addcanlockuser)
+        free(del->addcanlockuser);
     free(del);
 }
 
@@ -1703,6 +1712,10 @@ PERMgetpermissions(void)
     char *user[2];
     static ACCESSGROUP *noaccessconf;
 
+    free(VirtualPath);
+    VirtualPath = NULL;
+    VirtualPathlen = 0;
+
     if (ConfigBit == NULL) {
         if (PERMMAX % 8 == 0)
             ConfigBitsize = PERMMAX / 8;
@@ -1869,8 +1882,6 @@ PERMgetpermissions(void)
                       NNTP_FAIL_TERMINATING);
                 ExitWithStats(1, true);
             }
-            if (VirtualPath)
-                free(VirtualPath);
             if (strcasecmp(innconf->pathhost, PERMaccessconf->pathhost) == 0) {
                 /* Use domain, if pathhost in access realm matches one in
                  * inn.conf to differentiate virtual host. */
@@ -1892,8 +1903,7 @@ PERMgetpermissions(void)
                     concat(PERMaccessconf->pathhost, "!", (char *) 0);
             }
             VirtualPathlen = strlen(VirtualPath);
-        } else
-            VirtualPathlen = 0;
+        }
     } else {
         if (!noaccessconf)
             noaccessconf = xmalloc(sizeof(ACCESSGROUP));

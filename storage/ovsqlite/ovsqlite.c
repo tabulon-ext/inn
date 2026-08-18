@@ -36,8 +36,8 @@
 
 #    include "../ovinterface.h"
 
+#    include "inn/sqlite-helper.h"
 #    include "sql-read.h"
-#    include "sqlite-helper.h"
 #    include <sqlite3.h>
 
 #    ifdef HAVE_ZLIB
@@ -181,9 +181,9 @@ reader_decompress(uint8_t const *overview, uint32_t overview_len,
             (char *) reader_inflation.next_out - reader_flate->data;
         reader_inflation.next_in = NULL;
         reader_inflation.avail_in = 0;
-        inflateReset(&reader_inflation);
         if (status != Z_STREAM_END || reader_inflation.avail_out > 0)
             return NULL;
+        inflateReset(&reader_inflation);
         *out_len = reader_flate->left;
         return (uint8_t *) reader_flate->data;
     } else {
@@ -244,8 +244,9 @@ direct_open(void)
     int status;
     char *errmsg;
     char *journal_mode = NULL;
-    bool use_wal = false;
+    bool use_wal = true;
     unsigned long reader_cachesize = 2000; /* default 2 MB */
+    unsigned long mmapsize = 0;
     int version;
     int compress_flag;
     char sqltext[64];
@@ -265,6 +266,7 @@ direct_open(void)
         config_param_boolean(top, "walmode", &use_wal);
         config_param_unsigned_number(top, "readercachesize",
                                      &reader_cachesize);
+        config_param_unsigned_number(top, "mmapsize", &mmapsize);
         config_free(top);
     }
     if (!use_wal)
@@ -319,6 +321,20 @@ direct_open(void)
         status = sqlite3_exec(read_connection, sqltext, 0, NULL, &errmsg);
         if (status != SQLITE_OK) {
             warn("ovsqlite: cannot set reader cache size: %s", errmsg);
+            sqlite3_free(errmsg);
+        }
+    }
+
+    /* Set mmap size.  Memory-mapping the database lets multiple nnrpd reader
+     * processes share the same physical pages through the operating system's
+     * page cache, reducing total memory use.  This is of little benefit on
+     * ZFS or others without a unified buffer cache, where the mapped pages
+     * would simply be cached twice. */
+    if (mmapsize) {
+        snprintf(sqltext, sizeof sqltext, "pragma mmap_size = %lu;", mmapsize);
+        status = sqlite3_exec(read_connection, sqltext, 0, NULL, &errmsg);
+        if (status != SQLITE_OK) {
+            warn("ovsqlite: cannot set reader mmap size: %s", errmsg);
             sqlite3_free(errmsg);
         }
     }

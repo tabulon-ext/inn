@@ -23,17 +23,21 @@ TESTS	= authprogs/ident.t expire/tombstone.t expire/tombstone-hisexpire.t \
 	lib/confparse.t lib/daemon.t lib/date.t \
 	lib/dispatch.t lib/fdflag.t \
 	lib/getaddrinfo.t lib/getnameinfo.t lib/hash.t \
-	lib/hashtab.t lib/headers.t lib/hex.t lib/inet_aton.t \
+	lib/hashtab.t lib/headers.t lib/hex.t \
+	lib/hissqlite.t lib/hissqlite-convert.t \
+	lib/inet_aton.t \
 	lib/inet_ntoa.t lib/inet_ntop.t lib/innconf.t lib/list.t lib/md5.t \
 	lib/messageid.t lib/messages.t lib/mkstemp.t \
 	lib/network/addr-ipv4.t lib/network/addr-ipv6.t \
 	lib/network/client.t lib/network/server.t \
-	lib/pread.t lib/pwrite.t lib/qio.t lib/reallocarray.t \
+	lib/pread.t lib/pwrite.t lib/qio.t lib/readin.t lib/reallocarray.t \
+	lib/reservedfd.t \
 	lib/setenv.t lib/snprintf.t lib/strlcat.t \
 	lib/strlcpy.t lib/tst.t lib/uwildmat.t lib/vector.t lib/wire.t \
 	lib/xwrite.t nnrpd/auth-ext.t overview/api.t overview/buffindexed.t \
-	overview/ovsqlite.t overview/tradindexed.t overview/xref.t \
-	storage/cancel-tombstone.t util/innbind.t
+	overview/ovsqlite.t overview/tdx-group.t overview/tradindexed.t \
+	overview/xref.t \
+	storage/caf.t storage/cancel-tombstone.t util/innbind.t
 
 ##  Extra stuff that needs to be built before tests can be run.
 
@@ -41,17 +45,24 @@ EXTRA	= runtests clients/server-list docs/pod.t lib/xmalloc \
 	  overview/ovsqlite-read.t overview/ovsqlite-write.t \
 	  perl/minimum-version.t
 
+BENCHMARKS = lib/history-bench
+
 all check test tests: $(TESTS) $(EXTRA)
 	./runtests -l TESTS
 
 build: $(TESTS) $(EXTRA)
+
+benchmarks: $(BENCHMARKS)
+
+benchmark-history: $(BENCHMARKS)
+	./lib/history-bench -n 100M
 
 warnings:
 	$(MAKE) COPT="$(COPT) $(WARNINGS)" build
 
 clean clobber distclean maintclean:
 	rm -f *.o *.lo */*.o */*.lo */*/*.o */*/*.o \
-	  .pure */.pure */*/.pure $(TESTS) $(EXTRA)
+	  .pure */.pure */*/.pure $(TESTS) $(EXTRA) $(BENCHMARKS)
 	rm -rf .libs */.libs */*/.libs
 
 $(FIXSCRIPT):
@@ -180,6 +191,15 @@ lib/headers.t: lib/headers-t.o tap/basic.o $(LIBINN)
 lib/hex.t: lib/hex-t.o tap/basic.o $(LIBINN)
 	$(LINK) lib/hex-t.o tap/basic.o $(LIBINN) $(LIBS)
 
+lib/hissqlite.t: lib/hissqlite-t.o tap/basic.o $(STORAGEDEPS)
+	$(LINKDEPS) lib/hissqlite-t.o tap/basic.o $(STORAGELIBS) $(LIBS)
+
+lib/hissqlite-convert.t: lib/hissqlite-convert-t.o tap/basic.o $(STORAGEDEPS)
+	$(LINKDEPS) lib/hissqlite-convert-t.o tap/basic.o $(STORAGELIBS) $(LIBS)
+
+lib/history-bench: lib/history-bench.o $(STORAGEDEPS)
+	$(LINKDEPS) lib/history-bench.o $(STORAGELIBS) $(LIBS)
+
 lib/inet_aton.o: ../lib/inet_aton.c
 	$(CC) $(CFLAGS) -DTESTING -c -o $@ ../lib/inet_aton.c
 
@@ -250,11 +270,17 @@ lib/pwrite.t: lib/pwrite.o lib/pwrite-t.o tap/basic.o $(LIBINN)
 lib/qio.t: lib/qio-t.o tap/basic.o $(LIBINN)
 	$(LINK) lib/qio-t.o tap/basic.o $(LIBINN)
 
+lib/readin.t: lib/readin-t.o tap/basic.o $(LIBINN)
+	$(LINK) lib/readin-t.o tap/basic.o $(LIBINN)
+
 lib/reallocarray.o: ../lib/reallocarray.c
 	$(CC) $(CFLAGS) -DTESTING -c -o $@ ../lib/reallocarray.c
 
 lib/reallocarray.t: lib/reallocarray.o lib/reallocarray-t.o tap/basic.o $(LIBINN)
 	$(LINK) lib/reallocarray.o lib/reallocarray-t.o tap/basic.o $(LIBINN)
+
+lib/reservedfd.t: lib/reservedfd-t.o tap/basic.o $(LIBINN)
+	$(LINK) lib/reservedfd-t.o tap/basic.o $(LIBINN) $(LIBS)
 
 lib/setenv.o: ../lib/setenv.c
 	$(CC) $(CFLAGS) -DTESTING -c -o $@ ../lib/setenv.c
@@ -325,6 +351,9 @@ overview/ovsqlite-write.t: overview/ovsqlite-write-t.o tap/basic.o $(STORAGEDEPS
 	$(LINKDEPS) overview/ovsqlite-write-t.o tap/basic.o $(STORAGELIBS) \
 	    $(LIBS)
 
+overview/tdx-group.t: overview/tdx-group-t.o tap/basic.o $(STORAGEDEPS)
+	$(LINKDEPS) overview/tdx-group-t.o tap/basic.o $(STORAGELIBS) $(LIBS)
+
 overview/tradindexed-t.o: overview/overview-t.c
 	$(CC) $(CFLAGS) -DOVTYPE=tradindexed -c -o $@ overview/overview-t.c
 
@@ -336,6 +365,9 @@ overview/xref.t: overview/xref-t.o tap/basic.o $(STORAGEDEPS)
 
 perl/minimum-version.t: perl/minimum-version.t.in $(FIXSCRIPT)
 	$(FIX) -i perl/minimum-version.t.in
+
+storage/caf.t: storage/caf-t.o tap/basic.o $(STORAGEDEPS)
+	$(LINKDEPS) storage/caf-t.o tap/basic.o $(STORAGELIBS) $(LIBS)
 
 storage/cancel-tombstone.t: storage/cancel-tombstone-t.o tap/basic.o \
 	    $(STORAGEDEPS)

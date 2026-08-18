@@ -262,7 +262,7 @@ Running the test suite is done with:
 
     make check
 
-A single test can be run with verbose ouput via:
+A single test can be run with verbose output via:
 
     tests/runtests -o <name-of-test>
 
@@ -741,6 +741,7 @@ following commands to make sure they do not produce any errors:
 
     cnfsstat -a -v
     ctlinnd checkfile
+    hissqlite-util -A
     inncheck -a --perm --pedantic
     ovdb_stat -klmMtv
     ovsqlite-util -A
@@ -786,6 +787,10 @@ should also be bumped in F<doc/FAQ> at the end of subject 1.2.
 
 =item *
 
+Update F<SECURITY.md> if needed.
+
+=item *
+
 Double-check for the final release that the library version information
 in F<history/Makefile>, F<lib/Makefile>, and F<storage/Makefile>
 has been updated since the previous release.  Follow the rules given at
@@ -793,7 +798,9 @@ L<https://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.ht
 The commit message usually contains a brief description of API changes, if
 any, just for the record.  Avoid bumping SONAME in minor releases (ideally,
 changes in any interfaces should be delayed until the next major release, and
-the bump clearly mentioned in the releases notes).
+the bump clearly mentioned in the releases notes).  Note that increasing the
+first number in LTVERSION does not necessarily mean that SONAME has bumped;
+check the name of the generated libraries to be sure.
 
 =back
 

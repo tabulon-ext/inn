@@ -170,19 +170,21 @@ EXPsplit(char *p, char sep, char **argv, int count)
     if (*p == '\0')
         return 0;
 
-    for (i = 1, *argv++ = p; *p;)
-        if (*p++ == sep) {
-            p[-1] = '\0';
-            for (; *p == sep; p++)
-                ;
-            if (!*p)
-                return i;
-            if (++i == count)
-                /* Overflow. */
-                return -1;
-            *argv++ = p;
-        }
-    return i;
+    i = 0;
+    for (;;) {
+        if (i >= count)
+            return -1;
+        argv[i++] = p;
+        while (*p != '\0' && *p != sep)
+            p++;
+        if (*p == '\0')
+            return i;
+        *p++ = '\0';
+        while (*p == sep)
+            p++;
+        if (*p == '\0')
+            return i;
+    }
 }
 
 /*
@@ -365,7 +367,8 @@ EXPreadfile(FILE *F)
             *p = '\0';
         else
             p = buff + strlen(buff);
-        while (--p >= buff) {
+        while (p > buff) {
+            p--;
             if (isspace((unsigned char) *p))
                 *p = '\0';
             else
@@ -375,6 +378,11 @@ EXPreadfile(FILE *F)
             continue;
         if ((j = EXPsplit(buff, ':', fields, ARRAY_SIZE(fields))) == -1) {
             fprintf(stderr, "Line %d too many fields\n", i);
+            free(patterns);
+            return false;
+        }
+        if (j == 0) {
+            fprintf(stderr, "Line %d bad format\n", i);
             free(patterns);
             return false;
         }
@@ -622,7 +630,7 @@ ARTreadschema(void)
 
 /*
 **  Return a field from the overview line or NULL on error.  Return a copy
-**  since we might be re-using the line later.
+**  since we might be reusing the line later.
 */
 static char *
 OVERGetHeader(const char *p, int field)
@@ -697,6 +705,11 @@ OVfindheaderindex(void)
         krps = xmalloc(nGroups * sizeof(enum KRP));
         path = concatpath(innconf->pathetc, INN_PATH_EXPIRECTL);
         F = fopen(path, "r");
+        if (F == NULL) {
+            fprintf(stderr, "Can't read %s, %s\n", path, strerror(errno));
+            free(path);
+            exit(1);
+        }
         free(path);
         if (!EXPreadfile(F)) {
             fclose(F);

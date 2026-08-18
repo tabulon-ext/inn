@@ -1,6 +1,6 @@
 =head1 NAME
 
-his - routines for managing INN history
+libinnhist - Routines for managing INN history
 
 =head1 SYNOPSIS
 
@@ -29,7 +29,9 @@ his - routines for managing INN history
         HISCTLS_SYNCCOUNT,
         HISCTLS_NPAIRS,
         HISCTLS_IGNOREOLD,
-        HISCTLS_STATINTERVAL
+        HISCTLS_STATINTERVAL,
+        HISCTLG_INPLACEEXPIRE,
+        HISCTLG_ENTRYESTIMATE
     };
 
     struct history *HISopen(const char *path, const char *method,
@@ -84,14 +86,15 @@ These functions provide access to the INN history database.  They maintain
 key/value pairs in an opaque database whilst providing for expiry of
 outdated information.
 
-The history structure is an opaque handle returned from HISopen.
+The history structure is an opaque handle returned from B<HISopen>.
 
 The B<HISopen> function opens the history file designated by I<path>
 using the mode I<flags> using the specified I<method>.  I<flags> may be
 B<HIS_RDONLY> to indicate that read-only access to the history
 database is desired, or B<HIS_RDWR> for read/write access.  History
-methods are defined at build time; the history method currently
-available is "hisv6".  On success a newly initialised history handle is
+methods are defined at build time; the history methods currently
+available are C<hisv6> and, when INN is built with SQLite support,
+C<hissqlite>.  On success, a newly initialised history handle is
 returned, or B<NULL> on failure.
 
 B<HIS_ONDISK>, B<HIS_INCORE> and B<HIS_MMAP> may be logically ORed
@@ -119,7 +122,7 @@ B<true> on success.
 The B<HISsync> function synchronises any outstanding transactions
 associated with I<history> to disk.
 
-B<HISsetcache> associates a cache used for speeding up HIScheck with
+B<HISsetcache> associates a cache used for speeding up B<HIScheck> with
 I<history>.  The cache will occupy approximately I<size> bytes.
 
 B<HISlookup> retrieves a token from I<history> based on the passed
@@ -310,11 +313,33 @@ value of type B<bool> and will not be modified by the call.
 
 =item C<HISCTLS_STATINTERVAL> (time_t *)
 
-For the history v6 and tagged hash managers, set the interval, in
+For the C<hisv6> history method and tagged hash managers, set the interval, in
 seconds, between stat(2)s of the history files checking for replaced
 files (as happens during expire); this option is typically used by
 nnrpd(8) like applications.  I<val> should be a pointer to a value of
 type B<time_t> and will not be modified by the call.
+
+=item C<HISCTLG_INPLACEEXPIRE> (bool *)
+
+Indicate whether the history backend expires in place (mutating the live
+database via a writer rather than rebuilding a new file and swapping it).
+Backends that do not implement this selector leave the value untouched,
+so the caller must initialise it to false.  I<val> should be a pointer to a
+value of type B<bool> and will not be modified by the call.  expire(8) uses
+this to decide whether to open the history read/write (in place) or read-only
+(rebuild-and-swap, the hisv6 model).
+
+=item C<HISCTLG_ENTRYESTIMATE> (size_t *)
+
+Get a cheap, conservative overestimate of the number of entries in the
+history database, without scanning it, suitable for sizing data structures
+such as Bloom filters.  Each backend derives the estimate from its own
+on-disk layout: C<hisv6> divides the text file size by the minimum history
+line length, C<hissqlite> divides the allocated database pages by the
+minimum row footprint.  Returns false and leaves the value untouched if no
+estimate can be made; callers should fall back to their own default sizing.
+I<val> should be a pointer to a value of type B<size_t>.  expireover(8)
+uses this to size its Bloom filter before walking the history database.
 
 =back
 

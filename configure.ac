@@ -142,6 +142,7 @@ m4_include([m4/blocklist.m4])
 m4_include([m4/canlock.m4])
 m4_include([m4/cc-c-o.m4])
 m4_include([m4/cc-flags.m4])
+m4_include([m4/clang.m4])
 m4_include([m4/compress.m4])
 m4_include([m4/inet-ntoa.m4])
 m4_include([m4/iov-max.m4])
@@ -247,12 +248,12 @@ DO_DBZ_TAGGED_HASH=DONT
 inn_enable_tagged_hash=no
 AC_ARG_ENABLE([tagged-hash],
     [AS_HELP_STRING([--enable-tagged-hash],
-        [Use tagged hash table for history])],
+        [Use tagged hash table for hisv6 history])],
     [if test "x$enableval" = xyes ; then
         DO_DBZ_TAGGED_HASH=DO
         inn_enable_tagged_hash=yes
         AC_DEFINE([DO_TAGGED_HASH], [1],
-            [Define to use tagged hash for the history file.])
+            [Define to use tagged hash for the hisv6 history file.])
     fi])
 AC_SUBST([DO_DBZ_TAGGED_HASH])
 
@@ -798,10 +799,12 @@ dnl   -Wcast-qual                     Some structs require casting away const.
 dnl   -Wclass-varargs                 Not an actual problem.
 dnl   -Wcovered-switch-default        Does not do harm to have default cases.
 dnl   -Wc++-keyword                   Intended for C++, not applicable to C.
+dnl   -Wdefault-const-init-var        Intended for C++, not applicable to C.
 dnl   -Wdisabled-macro-expansion      Not an actual problem.
 dnl   -Wexcess-padding                Not an actual problem.
 dnl   -Wextra-semi-stmt               Useful for readability.
 dnl   -Wimplicit-void-ptr-cast        Intended for C++, not applicable to C.
+dnl   -Wnrvo                          Fine in C.
 dnl   -Wpacked                        Not an actual problem.
 dnl   -Wpadded                        Not an actual problem.
 dnl   -Wpoison-system-directories     Not an actual problem (e.g. Xcode).
@@ -812,6 +815,7 @@ dnl   -Wstack-protector-purecap-ignored Not an actual problem (CHERI hardware).
 dnl   -Wswitch-default                False positives with switches on enums.
 dnl   -Wswitch-enum                   Useless noise.
 dnl   -Wtautological-pointer-compare  False positives with for loops.
+dnl   -Wtentative-definition-compat   Intended for C++, not applicable to C.
 dnl   -Wundef                         Conflicts with Autoconf probe results.
 dnl   -Wunreachable-code              Happens with optional compilation.
 dnl   -Wunreachable-code-return       Other compilers get confused.
@@ -825,11 +829,6 @@ dnl -Wstack-protector (for gcc, but many false positives from small buffers)
 dnl -Wimplicit-int-conversion, -Wshorten-64-to-32 (for Clang)
 dnl -fstrict-overflow (for Clang, but -fwrapv used by embedded Perl causes an
 dnl error of "argument unused during compilation" in clang-11)
-dnl
-dnl First, we add -Wunknown-warning-option to CFLAGS so that Clang properly
-dnl reports probes for unknown flags as errors.
-INN_PROG_CC_FLAG([-Werror=unknown-warning-option],
-                 [CFLAGS="$CFLAGS -Werror=unknown-warning-option"], [])
 m4_foreach_w(
     [flag],
     [-fstrict-aliasing -fstrict-flex-arrays=3
@@ -851,7 +850,7 @@ m4_foreach_w(
      -Wnormalized=nfc -Wredundant-decls -Wrestrict -Wnested-externs -Winline
      -Winvalid-pch -Wvla -Wuse-after-free=3 -Wno-unused-function
      -Weverything -Wno-cast-qual -Wno-class-varargs -Wno-covered-switch-default
-     -Wno-c++-keyword
+     -Wno-c++-keyword -Wno-default-const-init-var
      -Wno-disabled-macro-expansion -Wno-excess-padding -Wno-extra-semi-stmt
      -Wno-implicit-int-conversion -Wno-implicit-void-ptr-cast
      -Wno-packed -Wno-padded
@@ -859,12 +858,19 @@ m4_foreach_w(
      -Wno-reserved-id-macro -Wno-reserved-identifier -Wno-shorten-64-to-32
      -Wno-sign-conversion -Wno-stack-protector-purecap-ignored
      -Wno-switch-default -Wno-switch-enum
-     -Wno-tautological-pointer-compare
+     -Wno-tautological-pointer-compare -Wno-tentative-definition-compat
      -Wno-undef -Wno-unreachable-code -Wno-unreachable-code-return
      -Wno-unsafe-buffer-usage
      -Wno-unused-macros -Wno-used-but-marked-unused],
     [INN_PROG_CC_FLAG(flag, [CC_WARNINGS="${CC_WARNINGS} flag"], [])])
 AC_SUBST([CC_WARNINGS])
+
+dnl The -Wno-nrvo option is recognized by GCC but then produces a warning that
+dnl it is valid for C++/ObjC++ but not for C.  Let's check for it only with
+dnl Clang.
+AS_IF([test x"$CLANG" = xyes],
+    [INN_PROG_CC_FLAG(-Wno-nrvo,
+        [CC_WARNINGS="${CC_WARNINGS} -Wno-nrvo"], [])])
 
 dnl On OpenBSD, the system headers contain many redundant declarations.
 AS_CASE([$host],
@@ -897,10 +903,6 @@ AS_IF([test x"$inn_enable_hardening_flags" = xyes],
                       [LDFLAGS="${LDFLAGS} -Wl,-z,relro"], [])
      INN_PROG_LD_FLAG([-Wl,-z,now],
                       [LDFLAGS="${LDFLAGS} -Wl,-z,now"], [])])
-
-dnl Now that compiler flags have been checked, remove -Wunknown-warning-option
-dnl from CFLAGS.
-CFLAGS=`AS_ECHO(["${CFLAGS}"]) | sed 's/ -Werror=unknown-warning-option//'`
 
 dnl Clean up our LIBS, just for grins.
 LIBS=`AS_ECHO(["$LIBS"]) | sed 's/^  *//' | sed 's/   */ /g' | sed 's/  *$//'`

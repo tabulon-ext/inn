@@ -1,6 +1,90 @@
+=head1 Upgrading from 2.7 to 2.8
+
+The following changes require your full attention because a manual
+intervention may be needed:
+
+=over 2
+
+=item *
+
+The minimum supported SQLite version is now 3.24.0, released in June 2018.
+Older versions are no longer accepted at configure time.
+
+=item *
+
+SQLite's Write-Ahead Logging journal mode is now enabled by default.  This
+setting notably improves read performance when multiple B<nnrpd> processes
+access the overview database simultaneously.  However, it does not work on
+network filesystems such as NFS when B<innd> and B<nnrpd> are not exclusively
+run on one mount consumer.  In case you use the ovsqlite overview method with
+an overview database shared on a network filesystem between two different
+hosts, you need manually setting to false the I<walmode> parameter in
+F<ovsqlite.conf>.
+
+=item *
+
+If you wish to take benefit from the new I<pathhistory> parameter in
+F<inn.conf> that permits configuring a dedicated directory for the history
+database, previously necessarily in I<pathdb> amongst other various files,
+you are encouraged to set it, and manually move the history files to the
+corresponding directory while INN is not running.  Separating history is
+especially useful with the new hissqlite history storage method on ZFS, where
+the dataset I<recordsize> should match the SQLite page size; see hissqlite(5)
+for more details.
+
+=item *
+
+You may also take benefit from the new hissqlite history storage method based
+on SQLite.  See hissqlite(5) and hissqlite-convert(8) for more information and
+how to migrate from an existing hisv6 history database.
+
+=back
+
+If you are upgrading from a version prior to S<INN 2.7>, see also
+L<Upgrading from 2.6 to 2.7>.
+
 =head1 Changes in 2.8.0 (not yet released)
 
 =over 2
+
+=item *
+
+A new history storage method based on SQLite has been added, named
+C<hissqlite>, selectable instead of C<hisv6> via the I<hismethod>
+parameter in F<inn.conf> when INN is built with SQLite support.  The
+B<hissqlite-convert> program permits migrating an existing C<hisv6> history
+database.  See hissqlite(5) for more details.  New I<hissqlitecachesize>,
+I<hissqlitemmapsize>, I<hissqlitepagesize> and I<hissqlitereadercachesize>
+parameters have also been added to F<inn.conf> to parameterize this new
+history storage method.  Many thanks to Keving Bowling for this great
+contribution!
+
+=item *
+
+The new hissqlite history storage method is accompanied with a history
+manipulation utility, B<hissqlite-util>, also contributed by Kevin Bowling,
+that performs some basic consistency checks and dump operations on an history
+database using the hissqlite method.  It can also report SQLite storage
+utilization, history entry counts and file sizes, and vacuum the database
+with B<-v> to reclaim freelist space when needed (not required in normal
+steady-state operation; see hissqlite(5)).
+
+=item *
+
+A new I<pathhistory> parameter has been added to F<inn.conf> for the directory
+that holds the history database files (the history(5) text file and its
+I<dbz> indices with the C<hisv6> history method, or F<history.sqlite> and
+its WAL files with C<hissqlite>).  The default is the value of I<pathdb>, so
+existing installations are unchanged if the parameter is left unset.  For new
+installations, it can be set at configure time with the B<--with-history-dir>
+passed to C<configure>.  Cancel and expireover tombstone logs stay under
+I<pathdb> (they are expiry state, not history files).  Thanks to Kevin Bowling
+for this feature.
+
+=item *
+
+The I<walmode> parameter in F<ovsqlite.conf> is now enabled by default for the
+ovsqlite overview method.
 
 =item *
 
@@ -27,9 +111,76 @@ Support for old insecure OpenSSL and LibreSSL versions have been dropped.
 You will have to use at least S<OpenSSL 1.1.1> or S<LibreSSL 2.8.0>.  Thanks
 to Roman Donchenko for the code simplification and cleaning.
 
+=item *
+
+Hardened several older code paths against memory-safety failures.  This
+includes buffer growth and concatenation in B<innfeed>, IMAP and LMTP response
+parsing, reserved file descriptor management, and hexadecimal and uuencoded 
+data handling.  Reader tracking and virtualhost permission state, batch
+error cleanup, and file-list growth in expiration tools were also corrected.
+Many thanks to Kevin Bowling for the patches.
+
 =back
 
-=head1 Changes in 2.7.4 (not yet released)
+=head1 Changes in 2.7.5 (not yet released)
+
+=over 2
+
+=item *
+
+A new B<-s> option in B<ovsqlite-util> reports SQLite storage utilization,
+database and journal file sizes, and active, deleted and total overview record
+counts.  Thanks to Kevin Bowling for this enhancement.
+
+=item *
+
+A new B<-v> option in B<ovsqlite-util> runs SQLite C<VACUUM> to reclaim
+freelist pages after large permanent shrinks of retention or bulk deletes.
+Vacuuming is not automatic and is usually unnecessary for a steady-state
+expiring spool (the freelist high-water mark is left in place on purpose);
+see ovsqlite(5).  Thanks to Kevin Bowling for this enhancement.
+
+=item *
+
+B<innreport> now recognizes the logs of cleanfeed-ng and Postfilter-NG, the
+maintained continuation of the historical Cleanfeed and Postfilter filters,
+respectively for B<innd> and B<nnrpd>.  Dedicated sections are also generated
+in daily Usenet reports to summarize audit and rejection events.  Thanks to
+Ivo Gandolfo for the feature and naturally also for going on maintaining these
+great Perl filters.
+
+=item *
+
+When I<laxmid> is set in the I<syntaxchecks> parameter in F<inn.conf>,
+Message-IDs without any C<@> character are now accepted by B<innd>.  It was
+not always the case in the previous version, though mentioned in the release
+notes.  It is now actually fixed, and I<laxmid> even accepts any allowed
+printable characters, no matter the order they appear in Message-IDs.
+
+=item *
+
+Fixed about twenty correctness and resource-lifetime defects in several
+programs thanks to Kevin Bowling.  They notably address stale pointers after
+buffer growth in B<innxmit>, descriptors and heap ownership in B<innxbatch>
+and B<innbind>, stale mode reasons in B<expire>, deterministic partial
+encoding in the C<c7unbatch> batch processor for B<rnews>, trusted-input
+bounds checks and one past-channel descriptor in B<innd>, various leakages
+in the external authentication helper of B<nnrpd>, and IMAP/LMTP connection
+lifecycle problems in B<imapfeed>.
+
+=item *
+
+Hardened several older code paths against memory-safety failures.  This
+includes bounded parsing of overview records during expiration, validation
+of corrupt OVDB records and search handles, robustness of the configuration
+parser, properly resetting timecaf resources after failed operations, detecting
+malformed stored Xref records with tradspool and corrupt history records.
+The overview and storage backends also validate more structures before using
+them.  Many thanks to Kevin Bowling for the patches.
+
+=back
+
+=head1 Changes in 2.7.4 (2026-06-22)
 
 =over 2
 
@@ -64,7 +215,7 @@ Added four new parameters to F<ovsqlite.conf> for the ovsqlite overview
 method: I<mmapsize> to have SQLite read data via mmap instead of copying
 into its own page cache, I<readercachesize> to set the SQLite in-memory
 page cache size for each B<nnrpd> reader process, I<walmode> to enable
-SQLite's Write-Ahead Logging journal mode and improve read performace when
+SQLite's Write-Ahead Logging journal mode and improve read performance when
 multiple B<nnrpd> processes access the overview database simultaneously,
 and I<walcheckpointthreshold> to parameterize when to perform checkpoints.
 See the ovsqlite(5) manual page for more details.  Thanks to Kevin Bowling for
@@ -105,6 +256,11 @@ Thanks to Jose Luis Duran for the information.
 
 Added support for the ALPN TLS extension in B<nnrpd>.  Thanks to Roman
 Donchenko for this feature.
+
+=item *
+
+In consequence of the changes in the libinnstorage(3) interface due to
+overview improvements, this library has its SONAME bump in this release.
 
 =item *
 
@@ -1270,7 +1426,7 @@ from that parameter.  Thanks to Steve Crook for the bug report.
 =item *
 
 When a data integrity layer was negotiated during a successful SASL
-authentication, B<nnrpd> was wrongly reseting any knowledge obtained
+authentication, B<nnrpd> was wrongly resetting any knowledge obtained
 from the client, such as the current newsgroup and article number.
 This behaviour now applies only when an encryption layer is negotiated.
 

@@ -51,6 +51,7 @@
 #include "inn/qio.h"
 #include "inn/sequence.h"
 #include "inn/timer.h"
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -101,6 +102,7 @@ hisv6_splitline(const char *line, const char **error, HASH *hash,
 {
     const char *p = line;
     char *end;
+    size_t i;
     unsigned long l;
     int r = 0;
 
@@ -110,13 +112,19 @@ hisv6_splitline(const char *line, const char **error, HASH *hash,
         return -1;
     }
     ++p;
-    if (hash)
-        *hash = TextToHash(p);
-    p += 32;
-    if (*p != ']') {
+    for (i = 0; i < 32; i++) {
+        if (p[i] == '\0' || !isxdigit((unsigned char) p[i])) {
+            *error = "invalid hash in history line";
+            return -1;
+        }
+    }
+    if (p[32] != ']') {
         *error = "`]' missing from history line";
         return -1;
     }
+    if (hash)
+        *hash = TextToHash(p);
+    p += 32;
     ++p;
     r |= HISV6_HAVE_HASH;
     if (*p != HISV6_FIELDSEP) {
@@ -370,7 +378,7 @@ hisv6_reopen(struct hisv6 *h)
                on-disk copies out of sync with the mmap'ed copies most of
                the time.  So if innd is using INCORE_MMAP, then we force
                everything else to use it, too (unless we're on NFS) */
-            if (!innconf->nfsreader) {
+            if (innconf != NULL && !innconf->nfsreader) {
                 opt.pag_incore = INCORE_MMAP;
                 opt.exists_incore = INCORE_MMAP;
             }
@@ -1441,6 +1449,24 @@ hisv6_ctl(void *history, int selector, void *val)
             h->npairs = 0;
         }
         break;
+
+    case HISCTLG_ENTRYESTIMATE: {
+        /* Minimum history line: 34 (hash) + 1 (tab) + 1 (arrived)
+         * + 1 (newline).  Dividing the text file size by this gives a
+         * conservative overestimate of the entry count. */
+        const size_t min_history_line = 37;
+        struct stat st;
+
+        if (h->histpath == NULL || stat(h->histpath, &st) != 0)
+            r = false;
+        else {
+            uintmax_t estimate = (uintmax_t) st.st_size / min_history_line;
+
+            *(size_t *) val =
+                estimate > SIZE_MAX ? SIZE_MAX : (size_t) estimate;
+        }
+        break;
+    }
 
     default:
         /* deliberately doesn't call hisv6_seterror as we don't want

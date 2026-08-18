@@ -173,9 +173,11 @@ EXPgetnum(int line, char *word, time_t *v, const char *name)
 static bool
 EXPreadfile(FILE *F)
 {
+    char *end;
     char *p;
     int i;
     int j;
+    long storage_class;
     bool SawDefault;
     char buff[BUFSIZ];
     char *fields[7];
@@ -239,9 +241,14 @@ EXPreadfile(FILE *F)
                 j = NUM_STORAGE_CLASSES;
                 SawDefault = true;
             } else {
-                j = atoi(fields[0]);
-                if ((j < 0) || (j >= NUM_STORAGE_CLASSES))
-                    warn("bad storage class %d on line %d", j, i);
+                errno = 0;
+                storage_class = strtol(fields[0], &end, 10);
+                if (errno != 0 || *end != '\0' || storage_class < 0
+                    || storage_class >= NUM_STORAGE_CLASSES) {
+                    warn("bad storage class %s on line %d", fields[0], i);
+                    return false;
+                }
+                j = storage_class;
             }
 
             if (!EXPgetnum(i, fields[1], &EXPclasses[j].Keep, "keep")
@@ -389,7 +396,7 @@ EXPremove(const TOKEN *token)
 **  previous expire run that crashed before unlinking.
 **
 **  consuming=true means this is a real run that will replace the
-**  history file; we rename cancels.tombstone to .processing under
+**  history database; we rename cancels.tombstone to .processing under
 **  the consumer's lock so concurrent appenders cannot lose cancels
 **  written between our read and the eventual unlink.
 **  consuming=false (dry-run, tracing, or alternate-output expire) skips
@@ -710,6 +717,7 @@ main(int ac, char *av[])
     bool Writing;
     bool UnlinkFile;
     bool val;
+    bool inplace;
     time_t TimeWarp;
     size_t Size = 0;
 
@@ -737,11 +745,11 @@ main(int ac, char *av[])
         notice("expiretombstone has no effect when groupbaseexpiry"
                " is false - check your inn.conf configuration");
 
-    HistoryText = concatpath(innconf->pathdb, INN_PATH_HISTORY);
+    HistoryText = concatpath(innconf->pathhistory, INN_PATH_HISTORY);
 
     umask(NEWSUMASK);
 
-    /* find the default history file directory */
+    /* find the default history database directory */
     EXPhistdir = xstrdup(HistoryText);
     p = strrchr(EXPhistdir, '/');
     if (p != NULL) {
@@ -779,6 +787,7 @@ main(int ac, char *av[])
             EXPusepost = true;
             break;
         case 'r':
+            free(EXPreason);
             EXPreason = xstrdup(optarg);
             break;
         case 's':
@@ -807,10 +816,10 @@ main(int ac, char *av[])
         Usage();
 
     /* if EXPtracing is set, then pass in a path, this ensures we
-     * don't replace the existing history files */
+     * don't replace the existing hisv6 history files */
     if (EXPtracing || NHistoryText || NHistoryPath) {
         if (NHistoryPath == NULL)
-            NHistoryPath = innconf->pathdb;
+            NHistoryPath = innconf->pathhistory;
         if (NHistoryText == NULL)
             NHistoryText = INN_PATH_HISTORY;
         NHistory = concatpath(NHistoryPath, NHistoryText);
@@ -852,6 +861,7 @@ main(int ac, char *av[])
             EXPreason = xstrdup(buff);
         }
     } else {
+        free(EXPreason);
         EXPreason = NULL;
     }
 
@@ -878,6 +888,57 @@ main(int ac, char *av[])
     HISctl(History, HISCTLS_IGNOREOLD, &IgnoreOld);
     if (Size != 0) {
         HISctl(History, HISCTLS_NPAIRS, &Size);
+    }
+
+    /* In-place backends (e.g. hissqlite) mutate the live database via a writer
+     * rather than rebuilding a new file and swapping it, so they must be
+     * opened read/write (even for a dry run: the expire scan runs on the
+     * writer connection).  Backends that do not implement
+     * HISCTLG_INPLACEEXPIRE leave the flag untouched, so the hisv6
+     * rebuild-and-swap path is unchanged.
+     *
+     * The modes that decouple the history rewrite from article removal need
+     * care here, because a run that does one but not the other corrupts the
+     * spool<->history correspondence (e.g. delete articles but keep their
+     * history rows).  All exits go through CleanupAndExit, not die(), so the
+     * server reservation taken above is released.
+     *
+     *   -t (tracing) is the dry run: EXPremove() already suppresses the
+     *   SMcancel(), and we additionally force Writing off so the live history
+     *   is not mutated -- it lists what would be removed and changes nothing.
+     *   (Unlike hisv6 it produces no history.n side file.)
+     *
+     *   -d/-f ask for a rebuilt history written to a side file, which an
+     *   in-place backend cannot produce, so they are refused.
+     *
+     *   -x on its own (suppress the history rewrite, but still remove
+     *   articles) is exactly the inconsistent run the dry run replaces,
+     *   so it is refused too; -t is the supported way to preview an expire. */
+    inplace = false;
+    HISctl(History, HISCTLG_INPLACEEXPIRE, &inplace);
+    if (inplace) {
+        if (EXPtracing) {
+            Writing = false;
+        } else if (NHistory != NULL) {
+            warn("%s expires in place and cannot write a separate history file"
+                 " (-d/-f); use -t for a dry run",
+                 innconf->hismethod);
+            CleanupAndExit(Server, false, 1);
+        } else if (!Writing) {
+            warn("%s expires in place: -x without -t would remove articles but"
+                 " leave their history entries; use -t for a dry run",
+                 innconf->hismethod);
+            CleanupAndExit(Server, false, 1);
+        }
+        HISclose(History);
+        History = HISopen(HistoryText, innconf->hismethod, HIS_RDWR);
+        if (!History) {
+            warn("cannot reopen history read/write for in-place expire");
+            CleanupAndExit(Server, false, 1);
+        }
+        HISctl(History, HISCTLS_IGNOREOLD, &IgnoreOld);
+        if (Size != 0)
+            HISctl(History, HISCTLS_NPAIRS, &Size);
     }
 
     val = true;
@@ -964,7 +1025,8 @@ main(int ac, char *av[])
         /* Got -z but file was closed; oops. */
         Bad = true;
 
-    /* If we're done okay, and we're not tracing, slip in the new files. */
+    /* If we're done okay, and we're not tracing, slip in the new hisv6 history
+       files. */
     if (EXPverbose) {
         if (Bad)
             printf("Expire errors: history files not updated.\n");

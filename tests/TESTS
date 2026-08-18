@@ -27,6 +27,9 @@ lib/hash
 lib/hashtab
 lib/headers
 lib/hex
+lib/hissqlite
+lib/hissqlite-convert
+lib/hissqlite-util
 lib/inet_aton
 lib/inet_ntoa
 lib/inet_ntop
@@ -43,7 +46,9 @@ lib/network/server
 lib/pread
 lib/pwrite
 lib/qio
+lib/readin
 lib/reallocarray
+lib/reservedfd
 lib/setenv
 lib/snprintf
 lib/strlcat
@@ -60,10 +65,12 @@ overview/buffindexed
 overview/overchan
 overview/ovsqlite
 overview/ovsqlite-integ
+overview/tdx-group
 overview/tradindexed
 overview/xref
 perl/minimum-version
 storage/archive
+storage/caf
 storage/cancel-tombstone
 storage/makehistory
 storage/sm

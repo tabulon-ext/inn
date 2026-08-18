@@ -556,7 +556,7 @@ CHANname(CHANNEL *cp)
 CHANNEL *
 CHANfromdescriptor(int fd)
 {
-    if (fd < 0 || fd > channels.table_size)
+    if (fd < 0 || fd >= channels.table_size)
         return NULL;
     return &channels.table[fd];
 }
@@ -779,12 +779,12 @@ CHANresize(CHANNEL *cp, size_t size)
     bp->left += change;
     p = bp->data;
 
-    /* Reallocate the buffer and adjust offets if realloc moved the location
-       of the memory region.  Only adjust offets if we're in a state where we
+    /* Reallocate the buffer and adjust offsets if realloc moved the location
+       of the memory region.  Only adjust offsets if we're in a state where we
        care about the header contents.
 
        FIXME: This is invalid C, although it will work on most (all?)  common
-       systems.  The pointers need to be reduced to offets and then turned
+       systems.  The pointers need to be reduced to offsets and then turned
        back into relative pointers rather than adjusting the pointers
        directly, since as soon as realloc is called, pointers into the old
        space become invalid and may not be used further, even for arithmetic.
